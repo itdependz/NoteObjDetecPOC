@@ -8,49 +8,42 @@ rf = Roboflow(api_key="PHdCfHHJVoVwM0ee9rP7")
 project = rf.workspace().project("2024-frc")
 model = project.version(8).model
 
-result = model.predict("robot-holding-note.jpg", confidence=40, overlap=30).json()
+model.download()
 
-target_class_ids = {3}
+video_path = "2024-frc-robot-pov.mp4"
+cap = cv2.VideoCapture(video_path)
 
-# Filter predictions
-filtered_predictions = [
-    pred for pred in result["predictions"]
-    if pred["class_id"] in target_class_ids
-]
+#Output video setup
+output_path = "NoteDetections.mp4"
+fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+out = cv2.VideoWriter(output_path, fourcc, 0, (640, 480))
 
-# Construct filtered result
-filtered_result = {
-    "predictions": filtered_predictions,
-    "image": result["image"]
-}
+while cap.isOpened():
+    ret, frame = cap.read()
+    if not ret:
+        break
 
+    # Perform object detection
+    results = model.predict(frame, confidence=40, overlap=30).json()
 
-result = filtered_result
+    for prediction in results['predictions']:
+        x = int(prediction['x'] - prediction['width'] / 2)
+        y = int(prediction['y'] - prediction['height'] / 2)
+        w = int(prediction['width'])
+        h = int(prediction['height'])
+        class_name = prediction['class']
+        confidence = prediction['confidence']
+        if class_name=="Note":
+            class_name = "Note Detected"
+        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        cv2.putText(frame, f'{class_name} {confidence:.2f}', (x, y - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-print(result)
+    cv2.imshow('Detection', frame)
+    out.write(frame)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
 
-labels = [item["class"] for item in result["predictions"] if item["class"] == "note"]
-
-for i in range(len(labels)):
-    labels[i] = f'note {i+1}'
-
-print(labels)
-
-detections = sv.Detections.from_inference(result)
-
-note_detections = detections[detections.class_id == 3]
-
-print(note_detections)
-        
-
-label_annotator = sv.LabelAnnotator()
-bounding_box_annotator = sv.BoxAnnotator()
-
-image = cv2.imread("robot-holding-note.jpg")
-
-annotated_image = bounding_box_annotator.annotate(
-    scene=image, detections=detections)
-annotated_image = label_annotator.annotate(
-    scene=annotated_image, detections=note_detections, labels=labels)
-
-sv.plot_image(image=annotated_image, size=(16, 16))
+cap.release()
+out.release()
+cv2.destroyAllWindows()
